@@ -6,9 +6,8 @@ This repository is essentially an exact mirror of the official source Atmosphere
 - This is a mirror of the official release that includes the latest ``fusee.bin`` as well as the atmosphere directory for the root you SD card. I've additionally included a ZIP of the TegraRCM GUI to inject Fusee.bin into Atmosphere
 
 XGC Special Thanks to: 
-https://github.com/Manu098vm @Manu098VM or helpig resolve an issue with this version not being able to work. <img width="3072" height="4080" alt="image" src="https://github.com/user-attachments/assets/13a861a8-d43c-45e9-9bb9-384e2b261844" />
+https://github.com/Manu098vm @Manu098VM or helpig resolve an issue with this version not being able to work. <img width="616" height="168" alt="image" src="https://github.com/user-attachments/assets/502b8dd4-9db6-4a26-b550-a5799e1b8174" />
 
-   
 =====
 =====
 ![Banner](img/banner.png?raw=true)
