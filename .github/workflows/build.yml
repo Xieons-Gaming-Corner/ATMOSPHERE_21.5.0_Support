@@ -1,77 +1,114 @@
-name: Build Atmosphere-NX
-permissions:
-  contents: read
+name: Build ATMOSPHERE 21.5.0 Support
 
 on:
   push:
     branches:
+      - main
       - master
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+
   pull_request:
     branches:
+      - main
       - master
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    permissions:
-      contents: write
-    runs-on: ubuntu-22.04  # Use stable runner
+    name: Build
+    runs-on: ubuntu-latest
+
+    # Official devkitPro Nintendo Switch / devkitA64 toolchain image.
+    # This replaces wget, dpkg, dkp-pacman, switch-dev, and devkitA64 setup.
+    container:
+      image: devkitpro/devkita64:latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 1
 
-      - name: Install devkitPro
+      - name: Install build dependencies
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential wget python3 python3-pip liblz4-dev
-          wget https://apt.devkitpro.org/install-devkitpro-pacman
-          sudo dpkg -i install-devkitpro-pacman
-          sudo dkp-pacman -Syu
-          sudo dkp-pacman -S switch-dev devkitA64 --noconfirm
-          pip3 install pyelftools
+          set -euo pipefail
 
-      - name: Set up devkitPro environment
-        run: |
-          echo "DEVKITPRO=/opt/devkitpro" >> $GITHUB_ENV
-          echo "DEVKITARM=/opt/devkitpro/devkitARM" >> $GITHUB_ENV
-          echo "DEVKITPPC=/opt/devkitpro/devkitPPC" >> $GITHUB_ENV
-          echo "/opt/devkitpro/tools/bin" >> $GITHUB_PATH  # Add tools to PATH
-          echo "/opt/devkitpro/devkitA64/bin" >> $GITHUB_PATH
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            git \
+            liblz4-dev \
+            python3 \
+            python3-pip
 
-      - name: Verify devkitPro tools
+          python3 -m pip install --no-cache-dir --break-system-packages pyelftools
+
+      - name: Show toolchain versions
+        shell: bash
         run: |
-          aarch64-none-elf-gcc --version  # Check compiler
+          set -euo pipefail
+
+          echo "DEVKITPRO=${DEVKITPRO:-not set}"
+          echo "DEVKITA64=${DEVKITA64:-not set}"
+
+          aarch64-none-elf-gcc --version
           make --version
           python3 --version
 
-      - name: Build Atmosphere
+      - name: Build project
+        shell: bash
         run: |
-          make -j$(nproc) || { echo "Build failed"; exit 1; }  # Explicit error handling
+          set -euo pipefail
 
-      - name: Prepare artifacts
+          make clean || true
+          make -j"$(nproc)"
+
+      - name: Collect release files
+        shell: bash
         run: |
-          mkdir -p artifacts/bootloader/payloads
-          cp fusee/bin/fusee.bin artifacts/bootloader/payloads/
-          cp -r out/* artifacts/
+          set -euo pipefail
 
-      - name: Upload Atmosphere artifacts
+          mkdir -p artifacts
+
+          find . \
+            -type f \
+            \( \
+              -name "*.nro" -o \
+              -name "*.elf" -o \
+              -name "*.kip" -o \
+              -name "*.kip1" -o \
+              -name "*.ovl" -o \
+              -name "*.nsp" \
+            \) \
+            -not -path "./.git/*" \
+            -exec cp --parents {} artifacts/ \;
+
+          echo "Collected files:"
+          find artifacts -type f -print || true
+
+          if ! find artifacts -type f -print -quit | grep -q .; then
+            echo "::error::Build finished, but no expected artifact files were found."
+            exit 1
+          fi
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: atmosphere-artifacts
+          name: ATMOSPHERE_21.5.0_Support
           path: artifacts/
           if-no-files-found: error
-          retention-days: 5
-
-      - name: Commit artifacts to repository
-        if: github.event_name == 'push'
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add artifacts/
-          git diff-index --quiet HEAD || git commit -m "Add compiled Atmosphere artifacts"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true  # Prevent failure on empty commits
+          retention-days: 14
