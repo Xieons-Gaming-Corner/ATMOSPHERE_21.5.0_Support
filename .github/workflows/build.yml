@@ -26,15 +26,12 @@ permissions:
 
 jobs:
   build:
-    name: Build
+    name: Build Atmosphere
     runs-on: ubuntu-latest
 
-    # Official devkitPro Nintendo Switch / devkitA64 build environment.
     container:
       image: devkitpro/devkita64:latest
 
-    # devkitPro is installed in the container but the devkitA64 compiler
-    # directory is not automatically included in PATH.
     env:
       DEVKITPRO: /opt/devkitpro
       DEVKITA64: /opt/devkitpro/devkitA64
@@ -47,12 +44,25 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Update devkitPro Switch dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dkp-pacman -Syu --noconfirm
+
+          dkp-pacman -S --needed --noconfirm \
+            devkitA64 \
+            switch-dev \
+            switch-tools
+
       - name: Install project dependencies
         shell: bash
         run: |
           set -euo pipefail
 
           apt-get update
+
           apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
@@ -66,35 +76,47 @@ jobs:
             --break-system-packages \
             pyelftools
 
-      - name: Verify devkitPro toolchain
+      - name: Verify toolchain and libnx
         shell: bash
         run: |
           set -euo pipefail
 
           echo "DEVKITPRO=${DEVKITPRO}"
           echo "DEVKITA64=${DEVKITA64}"
-          echo "PATH=${PATH}"
+          echo
 
           test -x "${DEVKITA64}/bin/aarch64-none-elf-gcc"
 
-          echo
-          echo "=== Compiler ==="
+          echo "=== devkitA64 ==="
           aarch64-none-elf-gcc --version
-
           echo
-          echo "=== Build tools ==="
-          make --version
-          python3 --version
 
+          echo "=== Installed devkitPro packages ==="
+          dkp-pacman -Q | grep -E '^(devkitA64|libnx|switch-)'
           echo
-          echo "=== Switch environment ==="
-          if [ -f "${DEVKITPRO}/switchvars.sh" ]; then
-            source "${DEVKITPRO}/switchvars.sh"
-            echo "LIBNX=${LIBNX:-not set}"
-            echo "PORTLIBS_PREFIX=${PORTLIBS_PREFIX:-not set}"
-          fi
 
-      - name: Build project
+          echo "=== Required libnx PGL API checks ==="
+          grep -R \
+            --line-number \
+            --include="*.h" \
+            "pglEventObserverGetShellEvent" \
+            "${DEVKITPRO}/libnx/include" \
+            || {
+              echo "::error::Installed libnx does not contain pglEventObserverGetShellEvent."
+              exit 1
+            }
+
+          grep -R \
+            --line-number \
+            --include="*.h" \
+            "pglGetHostProgramLaunchProperty" \
+            "${DEVKITPRO}/libnx/include" \
+            || {
+              echo "::error::Installed libnx does not contain pglGetHostProgramLaunchProperty."
+              exit 1
+            }
+
+      - name: Build Atmosphere
         shell: bash
         run: |
           set -euo pipefail
@@ -102,7 +124,7 @@ jobs:
           make clean || true
           make -j"$(nproc)"
 
-      - name: Collect build artifacts
+      - name: Prepare artifact directory
         shell: bash
         run: |
           set -euo pipefail
@@ -110,33 +132,35 @@ jobs:
           rm -rf artifacts
           mkdir -p artifacts
 
-          while IFS= read -r -d '' file; do
-            cp --parents "$file" artifacts/
-          done < <(
-            find . \
-              -type f \
-              \( \
-                -name "*.nro" -o \
-                -name "*.elf" -o \
-                -name "*.kip" -o \
-                -name "*.kip1" -o \
-                -name "*.ovl" -o \
-                -name "*.nsp" \
-              \) \
-              -not -path "./.git/*" \
-              -not -path "./artifacts/*" \
-              -print0
-          )
+          if [ -d "output" ]; then
+            cp -a output/. artifacts/
+          fi
 
-          echo "=== Artifacts ==="
+          if [ -d "atmosphere" ]; then
+            cp -a atmosphere artifacts/
+          fi
+
+          if [ -f "fusee.bin" ]; then
+            cp -a fusee.bin artifacts/
+          fi
+
+          if [ -f "exosphere.bin" ]; then
+            cp -a exosphere.bin artifacts/
+          fi
+
+          if [ -f "stratosphere.romfs" ]; then
+            cp -a stratosphere.romfs artifacts/
+          fi
+
+          echo "=== Release artifact contents ==="
           find artifacts -type f -print | sort || true
 
           if ! find artifacts -type f -print -quit | grep -q .; then
-            echo "::error::No .nro, .elf, .kip, .kip1, .ovl, or .nsp build artifacts were found."
+            echo "::error::The build completed, but no expected release files were found."
             exit 1
           fi
 
-      - name: Upload build artifacts
+      - name: Upload Atmosphere build
         uses: actions/upload-artifact@v4
         with:
           name: ATMOSPHERE_21.5.0_Support
