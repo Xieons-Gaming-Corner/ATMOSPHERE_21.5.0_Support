@@ -29,10 +29,16 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
 
-    # Official devkitPro Nintendo Switch / devkitA64 toolchain image.
-    # This replaces wget, dpkg, dkp-pacman, switch-dev, and devkitA64 setup.
+    # Official devkitPro Nintendo Switch / devkitA64 build environment.
     container:
       image: devkitpro/devkita64:latest
+
+    # devkitPro is installed in the container but the devkitA64 compiler
+    # directory is not automatically included in PATH.
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+      PATH: /opt/devkitpro/devkitA64/bin:/opt/devkitpro/tools/bin:/opt/devkitpro/portlibs/switch/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     steps:
       - name: Checkout repository
@@ -41,7 +47,7 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Install build dependencies
+      - name: Install project dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -55,19 +61,38 @@ jobs:
             python3 \
             python3-pip
 
-          python3 -m pip install --no-cache-dir --break-system-packages pyelftools
+          python3 -m pip install \
+            --no-cache-dir \
+            --break-system-packages \
+            pyelftools
 
-      - name: Show toolchain versions
+      - name: Verify devkitPro toolchain
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "DEVKITPRO=${DEVKITPRO:-not set}"
-          echo "DEVKITA64=${DEVKITA64:-not set}"
+          echo "DEVKITPRO=${DEVKITPRO}"
+          echo "DEVKITA64=${DEVKITA64}"
+          echo "PATH=${PATH}"
 
+          test -x "${DEVKITA64}/bin/aarch64-none-elf-gcc"
+
+          echo
+          echo "=== Compiler ==="
           aarch64-none-elf-gcc --version
+
+          echo
+          echo "=== Build tools ==="
           make --version
           python3 --version
+
+          echo
+          echo "=== Switch environment ==="
+          if [ -f "${DEVKITPRO}/switchvars.sh" ]; then
+            source "${DEVKITPRO}/switchvars.sh"
+            echo "LIBNX=${LIBNX:-not set}"
+            echo "PORTLIBS_PREFIX=${PORTLIBS_PREFIX:-not set}"
+          fi
 
       - name: Build project
         shell: bash
@@ -77,31 +102,37 @@ jobs:
           make clean || true
           make -j"$(nproc)"
 
-      - name: Collect release files
+      - name: Collect build artifacts
         shell: bash
         run: |
           set -euo pipefail
 
+          rm -rf artifacts
           mkdir -p artifacts
 
-          find . \
-            -type f \
-            \( \
-              -name "*.nro" -o \
-              -name "*.elf" -o \
-              -name "*.kip" -o \
-              -name "*.kip1" -o \
-              -name "*.ovl" -o \
-              -name "*.nsp" \
-            \) \
-            -not -path "./.git/*" \
-            -exec cp --parents {} artifacts/ \;
+          while IFS= read -r -d '' file; do
+            cp --parents "$file" artifacts/
+          done < <(
+            find . \
+              -type f \
+              \( \
+                -name "*.nro" -o \
+                -name "*.elf" -o \
+                -name "*.kip" -o \
+                -name "*.kip1" -o \
+                -name "*.ovl" -o \
+                -name "*.nsp" \
+              \) \
+              -not -path "./.git/*" \
+              -not -path "./artifacts/*" \
+              -print0
+          )
 
-          echo "Collected files:"
-          find artifacts -type f -print || true
+          echo "=== Artifacts ==="
+          find artifacts -type f -print | sort || true
 
           if ! find artifacts -type f -print -quit | grep -q .; then
-            echo "::error::Build finished, but no expected artifact files were found."
+            echo "::error::No .nro, .elf, .kip, .kip1, .ovl, or .nsp build artifacts were found."
             exit 1
           fi
 
