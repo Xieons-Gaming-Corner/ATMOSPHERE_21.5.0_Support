@@ -7,7 +7,7 @@ This repository is essentially an exact mirror of the official source Atmosphere
 
 XGC Special Thanks to: 
 https://github.com/Manu098vm @Manu098VM or helpig resolve an issue with this version not being able to work. <img width="616" height="168" alt="image" src="https://github.com/user-attachments/assets/502b8dd4-9db6-4a26-b550-a5799e1b8174" />
-
+.
 =====
 =====
 ![Banner](img/banner.png?raw=true)
