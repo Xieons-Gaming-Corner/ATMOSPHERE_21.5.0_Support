@@ -1,169 +1,107 @@
-name: Build ATMOSPHERE 21.5.0 Support
+name: AMS Build
 
 on:
-  push:
-    branches:
-      - main
-      - master
-    paths-ignore:
-      - "**.md"
-      - "LICENSE"
-      - ".gitignore"
-
-  pull_request:
-    branches:
-      - main
-      - master
-    paths-ignore:
-      - "**.md"
-      - "LICENSE"
-      - ".gitignore"
-
+  # push:
+    # branches: [ "*" ]
+  # pull_request:
+    # branches: [ "*" ]
   workflow_dispatch:
+  workflow_call:
 
-permissions:
-  contents: read
+permissions: write-all
 
 jobs:
   build:
-    name: Build Atmosphere
+    name: Build
     runs-on: ubuntu-latest
-
     container:
-      image: devkitpro/devkita64:latest
-
-    env:
-      DEVKITPRO: /opt/devkitpro
-      DEVKITA64: /opt/devkitpro/devkitA64
-      PATH: /opt/devkitpro/devkitA64/bin:/opt/devkitpro/tools/bin:/opt/devkitpro/portlibs/switch/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      image: 'devkitpro/devkita64'
+      ##image: 'ghcr.io/irneracoonovich/devkita64'
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          submodules: recursive
-          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Update devkitPro Switch dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
+      # - name: pacman  do not do this!!!!
+        # run: | 
+          # dkp-pacman -Syuu
+          # dkp-pacman -Sy switch-dev switch-glm switch-libjpeg-turbo devkitARM devkitarm-rules hactool
 
-          dkp-pacman -Syu --noconfirm
+      - name: get ubuntu version 
+        run: | 
+          cat /etc/os-release
+          ldd --version ldd
+     
+      # this works but too much time...  
+      # - name: install python and pip 
+        # run: | 
+          # sudo apt-get update
+          # sudo apt install -y make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
+          # wget https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tgz
+          # tar xzf Python-2.7.18.tgz
+          # cd Python-2.7.18
+          # ./configure  
+          # sudo make 
+          # sudo make install
+          # cd ..
+          # ##sudo apt -y install python-pip
+          # curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py
+          # python get-pip.py   
+          
+      - name: python install
+        run: | 
+          sudo apt-get update -y
+          sudo apt-get install -y python3 python3-lz4          
+                    
+      # - name: Install dependencies
+        # run: python -m pip install --upgrade pip lz4     
+      
+      # - name: python / nproc test
+        # run: | 
+          # python --version
+          # nproc 
+        
+      # - name: run fusee python script
+        # run: |
+          # cd fusee/program/
+          # python update_mtc_tables.py
+          # python update_sdram_params.py
+          # cd ../..
+        
+      - name: make 
+        run: | 
+          git config --global --add safe.directory /__w/Atmosphere/Atmosphere 
+          cd troposphere/haze
+          make -j$(nproc)
+          cd ../..
+          make -j$(nproc)
+          
+      - name: get date/date 
+        env:
+          TZ: "America/Chicago"
+        run: | 
+          echo "NOW=$(date +'%m-%d-%Y-%I.%M.%S.%p')" >> $GITHUB_ENV          
 
-          dkp-pacman -S --needed --noconfirm \
-            devkitA64 \
-            switch-dev \
-            switch-tools
-
-      - name: Install project dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          apt-get update
-
-          apt-get install -y --no-install-recommends \
-            build-essential \
-            ca-certificates \
-            git \
-            liblz4-dev \
-            python3 \
-            python3-pip
-
-          python3 -m pip install \
-            --no-cache-dir \
-            --break-system-packages \
-            pyelftools
-
-      - name: Verify toolchain and libnx
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "DEVKITPRO=${DEVKITPRO}"
-          echo "DEVKITA64=${DEVKITA64}"
-          echo
-
-          test -x "${DEVKITA64}/bin/aarch64-none-elf-gcc"
-
-          echo "=== devkitA64 ==="
-          aarch64-none-elf-gcc --version
-          echo
-
-          echo "=== Installed devkitPro packages ==="
-          dkp-pacman -Q | grep -E '^(devkitA64|libnx|switch-)'
-          echo
-
-          echo "=== Required libnx PGL API checks ==="
-          grep -R \
-            --line-number \
-            --include="*.h" \
-            "pglEventObserverGetShellEvent" \
-            "${DEVKITPRO}/libnx/include" \
-            || {
-              echo "::error::Installed libnx does not contain pglEventObserverGetShellEvent."
-              exit 1
-            }
-
-          grep -R \
-            --line-number \
-            --include="*.h" \
-            "pglGetHostProgramLaunchProperty" \
-            "${DEVKITPRO}/libnx/include" \
-            || {
-              echo "::error::Installed libnx does not contain pglGetHostProgramLaunchProperty."
-              exit 1
-            }
-
-      - name: Build Atmosphere
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          make clean || true
-          make -j"$(nproc)"
-
-      - name: Prepare artifact directory
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          rm -rf artifacts
-          mkdir -p artifacts
-
-          if [ -d "output" ]; then
-            cp -a output/. artifacts/
-          fi
-
-          if [ -d "atmosphere" ]; then
-            cp -a atmosphere artifacts/
-          fi
-
-          if [ -f "fusee.bin" ]; then
-            cp -a fusee.bin artifacts/
-          fi
-
-          if [ -f "exosphere.bin" ]; then
-            cp -a exosphere.bin artifacts/
-          fi
-
-          if [ -f "stratosphere.romfs" ]; then
-            cp -a stratosphere.romfs artifacts/
-          fi
-
-          echo "=== Release artifact contents ==="
-          find artifacts -type f -print | sort || true
-
-          if ! find artifacts -type f -print -quit | grep -q .; then
-            echo "::error::The build completed, but no expected release files were found."
-            exit 1
-          fi
-
-      - name: Upload Atmosphere build
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ATMOSPHERE_21.5.0_Support
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 14
+          name: release
+          path: ${{ github.workspace }}/out/nintendo_nx_arm64_armv8a
+     
+      - name: list out dir
+        run: |  
+          ls -la
+          ls -la out/nintendo_nx_arm64_armv8a
+          ls -la out/nintendo_nx_arm64_armv8a/release
+           
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.NOW }}
+          prerelease: false
+          draft: false
+          body: ${{ github.event.head_commit.message }}
+          files: ${{ github.workspace }}/out/nintendo_nx_arm64_armv8a/release/*.*
+          name: "Switch Release #${{ env.NOW }}"
+
+        
